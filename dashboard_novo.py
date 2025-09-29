@@ -987,29 +987,12 @@ def dashboard_geral(df_infos, df_transacoes):
             legend_title="Estado de Maturidade"
         )
         
-        # Adicionar annotations com valores nas barras empilhadas (apenas se não for NaN)
-        # Calcular posições acumuladas para cada mês
-        meses_unicos = sorted(df_distribuicao['Mes'].unique())
-        estados_unicos = ['Madura', 'Desenvolvimento', 'Declínio']
-        
-        for mes in meses_unicos:
-            acumulado = 0
-            for estado in estados_unicos:
-                dados_estado_mes = df_distribuicao[(df_distribuicao['Estado'] == estado) & (df_distribuicao['Mes'] == mes)]
-                if len(dados_estado_mes) > 0:
-                    quantidade = dados_estado_mes['Quantidade'].iloc[0]
-                    if quantidade > 0 and not pd.isna(quantidade):
-                        # Posição Y é o meio da barra desta camada
-                        y_pos = acumulado + (quantidade / 2)
-                        fig_distribuicao.add_annotation(
-                            x=mes,
-                            y=y_pos,
-                            text=f"{quantidade}",
-                            showarrow=False,
-                            font=dict(size=11, color="white", family="Arial Black"),
-                            yanchor='middle'
-                        )
-                    acumulado += quantidade
+        # Configurar para mostrar valores nas barras
+        fig_distribuicao.update_traces(
+            texttemplate='%{y}',
+            textposition='inside',
+            textfont=dict(size=12, color='white', family='Arial Black')
+        )
         
         st.plotly_chart(fig_distribuicao, use_container_width=True)
     
