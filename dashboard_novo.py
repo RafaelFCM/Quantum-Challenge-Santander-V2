@@ -1016,9 +1016,14 @@ def assistente_ia(df_infos, df_transacoes):
     
     st.header("Assistente de Análise Santander")
     
+    # Carregar dados analisados
+    df_analisada = pd.read_csv('dados/Base_Analisada.csv')
+    df_analisada['DT_REFE'] = pd.to_datetime(df_analisada['DT_REFE'])
+    
     # Armazenar dados no session state para o RAG
     st.session_state.df_infos = df_infos
     st.session_state.df_transacoes = df_transacoes
+    st.session_state.df_analisada = df_analisada
     
     # Explicação sobre o assistente
     st.markdown("""
