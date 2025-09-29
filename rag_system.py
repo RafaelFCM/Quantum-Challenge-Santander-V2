@@ -14,7 +14,7 @@ class SantanderRAG:
         self.base_url = "https://api.openai.com/v1/chat/completions"
         self.conversation_history = []
         
-    def prepare_context(self, df_infos: pd.DataFrame, df_transacoes: pd.DataFrame, df_analisada: pd.DataFrame = None, cnpj_selecionado: str = None) -> str:
+    def prepare_context(self, df_infos: pd.DataFrame, df_transacoes: pd.DataFrame, cnpj_selecionado: str = None) -> str:
         """Preparar contexto estruturado dos dados para o RAG"""
         
         context_parts = []
@@ -51,89 +51,77 @@ TOP 20 EMPRESAS POR FATURAMENTO (com setor):
 {top_empresas.to_string()}
 """)
         
-        # Análise de saúde financeira dos top CNPJs
+        # Análise de saúde financeira dos top CNPJs usando as mesmas funções do dashboard
         context_parts.append("""
 ANÁLISE DE SAÚDE FINANCEIRA DOS TOP CNPJs:
 """)
         
-        # Usar dados pré-calculados se disponíveis, senão calcular manualmente
-        if df_analisada is not None:
-            # Pegar dados do último mês para cada CNPJ
-            ultimo_mes_data = df_analisada[df_analisada['MES'] == df_analisada['MES'].max()]
+        # Importar as funções de cálculo do dashboard
+        from dashboard_novo import calcular_saude_empresa, calcular_risco_dependencia, calcular_score_santander
+        
+        for _, empresa in df_unique_fatu.nlargest(10, 'VL_FATU').iterrows():
+            cnpj_id = empresa['ID']
+            dados_cnpj = df_infos[df_infos['ID'] == cnpj_id].copy()
+            dados_cnpj = dados_cnpj.sort_values('DT_REFE')
             
-            for _, empresa in df_unique_fatu.nlargest(10, 'VL_FATU').iterrows():
-                cnpj_id = empresa['ID']
-                dados_analisados_cnpj = ultimo_mes_data[ultimo_mes_data['ID'] == cnpj_id]
+            if len(dados_cnpj) > 0:
+                saldo_atual = dados_cnpj['VL_SLDO'].iloc[-1]
+                saldo_inicial = dados_cnpj['VL_SLDO'].iloc[0]
+                variacao_saldo = saldo_atual - saldo_inicial
+                crescimento_percentual = (variacao_saldo / abs(saldo_inicial)) * 100 if saldo_inicial != 0 else 0
                 
-                if len(dados_analisados_cnpj) > 0:
-                    dados_cnpj = df_infos[df_infos['ID'] == cnpj_id].copy()
-                    dados_cnpj = dados_cnpj.sort_values('DT_REFE')
-                    
-                    if len(dados_cnpj) > 0:
-                        saldo_atual = dados_cnpj['VL_SLDO'].iloc[-1]
-                        saldo_inicial = dados_cnpj['VL_SLDO'].iloc[0]
-                        variacao_saldo = saldo_atual - saldo_inicial
-                        crescimento_percentual = (variacao_saldo / abs(saldo_inicial)) * 100 if saldo_inicial != 0 else 0
-                        
-                        # Usar dados pré-calculados
-                        ultimo_mes = dados_analisados_cnpj.iloc[0]
-                        score_saude = ultimo_mes['score_saude_model_0_100_lgbm']
-                        score_risco = ultimo_mes['score_dependencia_risco_0_100']
-                        burn_rate = ultimo_mes['burn_rate_mes']
-                        runway = ultimo_mes['runway_meses']
-                        estado_maturidade = ultimo_mes['estado_maturidade_hard']
-                        
-                        # Calcular relacionamentos básicos
-                        transacoes_cnpj = df_transacoes[
-                            (df_transacoes['ID_PGTO'] == cnpj_id) | 
-                            (df_transacoes['ID_RCBE'] == cnpj_id)
-                        ]
-                        num_relacionamentos = len(set(transacoes_cnpj['ID_PGTO'].unique()) | set(transacoes_cnpj['ID_RCBE'].unique()))
-                        volume_transacoes = transacoes_cnpj['VL'].sum()
-                        
-                        context_parts.append(f"""
+                # Calcular estabilidade
+                cv_saldo = dados_cnpj['VL_SLDO'].std() / dados_cnpj['VL_SLDO'].mean() if dados_cnpj['VL_SLDO'].mean() != 0 else 1
+                
+                # Calcular relacionamentos
+                transacoes_cnpj = df_transacoes[
+                    (df_transacoes['ID_PGTO'] == cnpj_id) | 
+                    (df_transacoes['ID_RCBE'] == cnpj_id)
+                ]
+                num_relacionamentos = len(set(transacoes_cnpj['ID_PGTO'].unique()) | set(transacoes_cnpj['ID_RCBE'].unique()))
+                volume_transacoes = transacoes_cnpj['VL'].sum()
+                
+                # Calcular HHI
+                pagamentos = transacoes_cnpj[transacoes_cnpj['ID_PGTO'] == cnpj_id]
+                recebimentos = transacoes_cnpj[transacoes_cnpj['ID_RCBE'] == cnpj_id]
+                
+                def calculate_hhi(values):
+                    if len(values) == 0:
+                        return 0
+                    total = sum(values)
+                    if total == 0:
+                        return 0
+                    return sum((v/total)**2 for v in values)
+                
+                hhi_pagamento = calculate_hhi(pagamentos.groupby('ID_RCBE')['VL'].sum().values)
+                hhi_recebimento = calculate_hhi(recebimentos.groupby('ID_PGTO')['VL'].sum().values)
+                hhi_medio = (hhi_pagamento + hhi_recebimento) / 2
+                
+                # Calcular burn rate
+                deltas = dados_cnpj['VL_SLDO'].diff().dropna()
+                burn_rate = abs(deltas[deltas < 0].mean()) if len(deltas[deltas < 0]) > 0 else 0
+                runway = saldo_atual / burn_rate if burn_rate > 0 else float('inf')
+                
+                # Usar as mesmas funções do dashboard para métricas avançadas
+                score_saude, categoria_saude = calcular_saude_empresa(df_infos, df_transacoes, cnpj_id)
+                score_risco, categoria_risco = calcular_risco_dependencia(df_transacoes, cnpj_id)
+                score_santander, detalhes_santander = calcular_score_santander(df_infos, df_transacoes, cnpj_id)
+                
+                context_parts.append(f"""
 CNPJ_{cnpj_id}:
 - Faturamento: R$ {empresa['VL_FATU']:,.2f}
 - Setor: {empresa['DS_CNAE']}
 - Saldo Atual: R$ {saldo_atual:,.2f}
 - Variação do Saldo: R$ {variacao_saldo:,.2f} ({crescimento_percentual:+.1f}%)
+- Estabilidade (CV): {cv_saldo:.3f}
 - Número de Relacionamentos: {num_relacionamentos}
 - Volume de Transações: R$ {volume_transacoes:,.2f}
+- HHI Médio (Concentração): {hhi_medio:.3f}
 - Burn Rate: R$ {burn_rate:,.2f}/mês
 - Runway: {runway:.1f} meses
-- Score de Saúde: {score_saude:.1f}
-- Risco de Dependência: {score_risco:.1f}
-- Estado de Maturidade: {estado_maturidade}
-""")
-        else:
-            # Fallback: calcular manualmente (código original)
-            for _, empresa in df_unique_fatu.nlargest(10, 'VL_FATU').iterrows():
-                cnpj_id = empresa['ID']
-                dados_cnpj = df_infos[df_infos['ID'] == cnpj_id].copy()
-                dados_cnpj = dados_cnpj.sort_values('DT_REFE')
-                
-                if len(dados_cnpj) > 0:
-                    saldo_atual = dados_cnpj['VL_SLDO'].iloc[-1]
-                    saldo_inicial = dados_cnpj['VL_SLDO'].iloc[0]
-                    variacao_saldo = saldo_atual - saldo_inicial
-                    crescimento_percentual = (variacao_saldo / abs(saldo_inicial)) * 100 if saldo_inicial != 0 else 0
-                    
-                    # Calcular relacionamentos básicos
-                    transacoes_cnpj = df_transacoes[
-                        (df_transacoes['ID_PGTO'] == cnpj_id) | 
-                        (df_transacoes['ID_RCBE'] == cnpj_id)
-                    ]
-                    num_relacionamentos = len(set(transacoes_cnpj['ID_PGTO'].unique()) | set(transacoes_cnpj['ID_RCBE'].unique()))
-                    volume_transacoes = transacoes_cnpj['VL'].sum()
-                    
-                    context_parts.append(f"""
-CNPJ_{cnpj_id}:
-- Faturamento: R$ {empresa['VL_FATU']:,.2f}
-- Setor: {empresa['DS_CNAE']}
-- Saldo Atual: R$ {saldo_atual:,.2f}
-- Variação do Saldo: R$ {variacao_saldo:,.2f} ({crescimento_percentual:+.1f}%)
-- Número de Relacionamentos: {num_relacionamentos}
-- Volume de Transações: R$ {volume_transacoes:,.2f}
+- Score de Saúde: {score_saude:.1f} ({categoria_saude})
+- Risco de Dependência: {score_risco:.1f} ({categoria_risco})
+- Score Santander: {score_santander:.1f}
 """)
         
         # Análise de risco por setor
@@ -160,111 +148,75 @@ ANÁLISE DE RISCO POR SETOR:
 - Volume de transações: R$ {volume_setor:,.2f}
 """)
         
-        # Análise de empresas com melhor perfil para crédito
+        # Análise de empresas com melhor perfil para crédito usando Score Santander
         context_parts.append("""
-RANKING DE EMPRESAS PARA CRÉDITO:
+RANKING DE EMPRESAS PARA CRÉDITO (baseado no Score Santander):
 """)
         
-        if df_analisada is not None:
-            # Usar dados pré-calculados para ranking
-            ultimo_mes_data = df_analisada[df_analisada['MES'] == df_analisada['MES'].max()]
+        # Calcular Score Santander para todos os CNPJs
+        df_ranking = df_unique_fatu.copy()
+        df_ranking['Score_Santander'] = 0
+        df_ranking['Score_Saude'] = 0
+        df_ranking['Risco_Dependencia'] = 0
+        
+        for idx, empresa in df_ranking.iterrows():
+            cnpj_id = empresa['ID']
             
-            # Filtrar empresas ideais para empréstimos (mesmos critérios do dashboard)
-            empresas_ideais = ultimo_mes_data[
-                (ultimo_mes_data['score_saude_model_0_100_lgbm'] >= ultimo_mes_data['q25_health']) &
-                (ultimo_mes_data['score_dependencia_risco_0_100'] < ultimo_mes_data['q75_risk']) &
-                (ultimo_mes_data['runway_meses'] >= 1) &
-                (ultimo_mes_data['flag_stress_caixa'] == 0) &
-                (ultimo_mes_data['grow_volume_total_mes'] > 0) &
-                (ultimo_mes_data['estado_maturidade_hard'].isin(['Madura', 'Desenvolvimento']))
-            ].copy()
+            # Usar as mesmas funções do dashboard
+            score_saude, categoria_saude = calcular_saude_empresa(df_infos, df_transacoes, cnpj_id)
+            score_risco, categoria_risco = calcular_risco_dependencia(df_transacoes, cnpj_id)
+            score_santander, detalhes_santander = calcular_score_santander(df_infos, df_transacoes, cnpj_id)
             
-            if len(empresas_ideais) > 0:
-                # Ordenar por score de saúde
-                empresas_ideais = empresas_ideais.sort_values('score_saude_model_0_100_lgbm', ascending=False)
-                top_empresas_ideais = empresas_ideais.head(15)
-                
-                context_parts.append(f"""
-TOP 15 EMPRESAS PARA CRÉDITO:
-{top_empresas_ideais[['ID', 'score_saude_model_0_100_lgbm', 'score_dependencia_risco_0_100', 
-                     'runway_meses', 'estado_maturidade_hard']].to_string()}
+            df_ranking.loc[idx, 'Score_Santander'] = score_santander
+            df_ranking.loc[idx, 'Score_Saude'] = score_saude
+            df_ranking.loc[idx, 'Risco_Dependencia'] = score_risco
+        
+        # Top 15 empresas para crédito baseado no Score Santander
+        top_credito = df_ranking.nlargest(15, 'Score_Santander')[['ID', 'VL_FATU', 'DS_CNAE', 'Score_Santander', 'Score_Saude', 'Risco_Dependencia']]
+        
+        context_parts.append(f"""
+TOP 15 EMPRESAS PARA CRÉDITO (Score Santander):
+{top_credito.to_string()}
 """)
-            else:
-                context_parts.append("Nenhuma empresa atende aos critérios ideais para empréstimos no momento.")
-        else:
-            # Fallback: usar dados básicos
-            context_parts.append("Dados analisados não disponíveis para ranking detalhado.")
         
         # Análise de empresas em risco
         context_parts.append("""
 EMPRESAS COM ALERTAS DE RISCO:
 """)
         
-        if df_analisada is not None:
-            # Usar dados pré-calculados para identificar empresas em risco
-            ultimo_mes_data = df_analisada[df_analisada['MES'] == df_analisada['MES'].max()]
+        empresas_risco = []
+        for _, empresa in df_unique_fatu.iterrows():
+            cnpj_id = empresa['ID']
+            dados_cnpj = df_infos[df_infos['ID'] == cnpj_id].copy()
+            dados_cnpj = dados_cnpj.sort_values('DT_REFE')
             
-            # Filtrar empresas perigosas (mesmos critérios do dashboard)
-            empresas_perigosas = ultimo_mes_data[
-                (ultimo_mes_data['score_saude_model_0_100_lgbm'] <= ultimo_mes_data['q25_health']) &
-                (ultimo_mes_data['score_dependencia_risco_0_100'] >= ultimo_mes_data['q75_risk']) &
-                ((ultimo_mes_data['runway_meses'] < 3) | (ultimo_mes_data['runway_meses'].isna())) &
-                (ultimo_mes_data['flag_stress_caixa'] == 1) &
-                (ultimo_mes_data['grow_volume_total_mes'] < 0) &
-                (ultimo_mes_data['estado_maturidade_hard'].isin(['Declínio', 'Declínio Persistente']))
-            ].copy()
-            
-            if len(empresas_perigosas) > 0:
-                # Ordenar por score de saúde (menores primeiro)
-                empresas_perigosas = empresas_perigosas.sort_values('score_saude_model_0_100_lgbm', ascending=True)
-                top_empresas_perigosas = empresas_perigosas.head(10)
+            if len(dados_cnpj) > 0:
+                saldo_atual = dados_cnpj['VL_SLDO'].iloc[-1]
+                saldo_inicial = dados_cnpj['VL_SLDO'].iloc[0]
+                variacao_saldo = saldo_atual - saldo_inicial
                 
-                for _, empresa in top_empresas_perigosas.iterrows():
-                    context_parts.append(f"""
-CNPJ_{empresa['ID']}:
-- Score de Saúde: {empresa['score_saude_model_0_100_lgbm']:.1f}
-- Risco de Dependência: {empresa['score_dependencia_risco_0_100']:.1f}
-- Runway: {empresa['runway_meses']:.1f} meses
-- Estado: {empresa['estado_maturidade_hard']}
-- ALERTA: Empresa de alto risco
-""")
-            else:
-                context_parts.append("Nenhuma empresa atende aos critérios de alto risco no momento.")
-        else:
-            # Fallback: calcular manualmente
-            empresas_risco = []
-            for _, empresa in df_unique_fatu.iterrows():
-                cnpj_id = empresa['ID']
-                dados_cnpj = df_infos[df_infos['ID'] == cnpj_id].copy()
-                dados_cnpj = dados_cnpj.sort_values('DT_REFE')
+                # Calcular burn rate
+                deltas = dados_cnpj['VL_SLDO'].diff().dropna()
+                burn_rate = abs(deltas[deltas < 0].mean()) if len(deltas[deltas < 0]) > 0 else 0
+                runway = saldo_atual / burn_rate if burn_rate > 0 else float('inf')
                 
-                if len(dados_cnpj) > 0:
-                    saldo_atual = dados_cnpj['VL_SLDO'].iloc[-1]
-                    saldo_inicial = dados_cnpj['VL_SLDO'].iloc[0]
-                    variacao_saldo = saldo_atual - saldo_inicial
+                # Critérios de risco
+                if (saldo_atual < 0 or 
+                    runway < 3 or 
+                    variacao_saldo < -empresa['VL_FATU'] * 0.1):
                     
-                    # Calcular burn rate
-                    deltas = dados_cnpj['VL_SLDO'].diff().dropna()
-                    burn_rate = abs(deltas[deltas < 0].mean()) if len(deltas[deltas < 0]) > 0 else 0
-                    runway = saldo_atual / burn_rate if burn_rate > 0 else float('inf')
-                    
-                    # Critérios de risco
-                    if (saldo_atual < 0 or 
-                        runway < 3 or 
-                        variacao_saldo < -empresa['VL_FATU'] * 0.1):
-                        
-                        empresas_risco.append({
-                            'CNPJ': cnpj_id,
-                            'Faturamento': empresa['VL_FATU'],
-                            'Saldo_Atual': saldo_atual,
-                            'Variacao': variacao_saldo,
-                            'Runway': runway,
-                            'Setor': empresa['DS_CNAE']
-                        })
-            
-            if empresas_risco:
-                for empresa in empresas_risco[:10]:  # Top 10 em risco
-                    context_parts.append(f"""
+                    empresas_risco.append({
+                        'CNPJ': cnpj_id,
+                        'Faturamento': empresa['VL_FATU'],
+                        'Saldo_Atual': saldo_atual,
+                        'Variacao': variacao_saldo,
+                        'Runway': runway,
+                        'Setor': empresa['DS_CNAE']
+                    })
+        
+        if empresas_risco:
+            for empresa in empresas_risco[:10]:  # Top 10 em risco
+                context_parts.append(f"""
 CNPJ_{empresa['CNPJ']}:
 - Faturamento: R$ {empresa['Faturamento']:,.2f}
 - Saldo Atual: R$ {empresa['Saldo_Atual']:,.2f}
@@ -273,8 +225,6 @@ CNPJ_{empresa['CNPJ']}:
 - Setor: {empresa['Setor']}
 - ALERTA: {'Saldo negativo' if empresa['Saldo_Atual'] < 0 else 'Runway baixo' if empresa['Runway'] < 3 else 'Declínio significativo'}
 """)
-            else:
-                context_parts.append("Nenhuma empresa identificada com alertas de risco.")
         
         # Análise específica do CNPJ se selecionado
         if cnpj_selecionado:
@@ -304,30 +254,15 @@ CNPJ_{empresa['CNPJ']}:
                 saldo_inicial = dados_cnpj_sorted['VL_SLDO'].iloc[0]
                 variacao_total = saldo_atual - saldo_inicial
                 
-                # Usar dados pré-calculados se disponíveis
-                if df_analisada is not None:
-                    dados_analisados_cnpj = df_analisada[df_analisada['ID'] == cnpj_selecionado]
-                    if len(dados_analisados_cnpj) > 0:
-                        ultimo_mes = dados_analisados_cnpj.iloc[-1]
-                        score_saude = ultimo_mes['score_saude_model_0_100_lgbm']
-                        score_risco = ultimo_mes['score_dependencia_risco_0_100']
-                        burn_rate = ultimo_mes['burn_rate_mes']
-                        runway = ultimo_mes['runway_meses']
-                        estado_maturidade = ultimo_mes['estado_maturidade_hard']
-                    else:
-                        # Fallback para valores padrão
-                        score_saude = 50
-                        score_risco = 50
-                        burn_rate = 0
-                        runway = float('inf')
-                        estado_maturidade = "N/A"
-                else:
-                    # Fallback para valores padrão
-                    score_saude = 50
-                    score_risco = 50
-                    burn_rate = 0
-                    runway = float('inf')
-                    estado_maturidade = "N/A"
+                # Calcular métricas avançadas usando as mesmas funções do dashboard
+                score_saude, categoria_saude = calcular_saude_empresa(df_infos, df_transacoes, cnpj_selecionado)
+                score_risco, categoria_risco = calcular_risco_dependencia(df_transacoes, cnpj_selecionado)
+                score_santander, detalhes_santander = calcular_score_santander(df_infos, df_transacoes, cnpj_selecionado)
+                
+                # Calcular burn rate e runway
+                deltas = dados_cnpj['VL_SLDO'].diff().dropna()
+                burn_rate = abs(deltas[deltas < 0].mean()) if len(deltas[deltas < 0]) > 0 else 0
+                runway = saldo_atual / burn_rate if burn_rate > 0 else float('inf')
                 
                 # Calcular HHI
                 def calculate_hhi(values):
@@ -356,9 +291,9 @@ ANÁLISE ESPECÍFICA DO CNPJ {cnpj_selecionado}:
 - HHI Médio: {hhi_medio:.3f}
 - Burn Rate: R$ {burn_rate:,.2f}/mês
 - Runway: {runway:.1f} meses
-- Score de Saúde: {score_saude:.1f}
-- Risco de Dependência: {score_risco:.1f}
-- Estado de Maturidade: {estado_maturidade}
+- Score de Saúde: {score_saude:.1f} ({categoria_saude})
+- Risco de Dependência: {score_risco:.1f} ({categoria_risco})
+- Score Santander: {score_santander:.1f}
 
 EVOLUÇÃO MENSAL DO SALDO:
 {dados_cnpj_sorted[['DT_REFE', 'VL_SLDO']].to_string()}
@@ -506,6 +441,9 @@ def create_chat_interface():
     
     st.subheader("Assistente de Análise Santander")
     
+    # Informação sobre o status da funcionalidade
+    st.info("🚀 **Observação:** Esta funcionalidade está em desenvolvimento (versão beta)! Ela já funciona perfeitamente, mas está demorando em média 4 minutos para responder.")
+    
     # Inicializar RAG se não existir
     if 'rag_system' not in st.session_state:
         st.session_state.rag_system = SantanderRAG()
@@ -535,11 +473,10 @@ def create_chat_interface():
             # Obter dados do contexto do Streamlit
             df_infos = st.session_state.get('df_infos')
             df_transacoes = st.session_state.get('df_transacoes')
-            df_analisada = st.session_state.get('df_analisada')
             
             if df_infos is not None and df_transacoes is not None:
                 context = st.session_state.rag_system.prepare_context(
-                    df_infos, df_transacoes, df_analisada, cnpj_selecionado
+                    df_infos, df_transacoes, cnpj_selecionado
                 )
                 
                 # Gerar resposta

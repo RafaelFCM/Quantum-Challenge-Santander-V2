@@ -259,6 +259,10 @@ $env:OPENAI_API_KEY="sua_chave_aqui"
 2. **Augmentation**: Enriquece o contexto com métricas calculadas
 3. **Generation**: ChatGPT-4 gera resposta inteligente
 
+## 🤖 Exemplo IA Funcionando
+
+![Exemplo IA Funcionando](Exemplo-IA-Funcionando.png)
+
 ---
 
 **Desenvolvido para o Santander** 🏦
