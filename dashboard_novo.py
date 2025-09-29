@@ -403,6 +403,17 @@ def main():
     """Função principal"""
     st.markdown('<h1 class="main-header">Dashboard Santander - Análise de CNPJs</h1>', unsafe_allow_html=True)
     
+    # Link da apresentação
+    st.markdown("""
+    <div style="text-align: center; margin: 15px 0;">
+        <h2 style="color: #e60012; font-size: 2rem;">
+             <a href="https://youtu.be/38opEqyDM8w" target="_blank" style="color: #e60012; text-decoration: none;">
+                LINK DA APRESENTAÇÃO
+            </a>
+        </h2>
+    </div>
+    """, unsafe_allow_html=True)
+    
     # Carregar dados
     df_infos, df_transacoes, df_analisada = load_data()
     
