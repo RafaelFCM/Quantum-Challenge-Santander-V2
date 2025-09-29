@@ -411,10 +411,14 @@ def main():
         return
     
     # Sidebar para navegação
+    # Logo da Quantum
+    st.sidebar.image("Logo-Quantum.png", width=200)
+    st.sidebar.markdown("---")
+    
     st.sidebar.title("Navegação")
     page = st.sidebar.radio(
         "Escolha uma página:",
-        ["Dashboard Geral", "Análise Individual", "Assistente IA"]
+        ["Dashboard Geral", "Análise Individual", "Assistente IA", "Equipe Quantum"]
     )
     
     # Navegação entre páginas
@@ -424,6 +428,58 @@ def main():
         analise_individual(df_infos, df_transacoes, df_analisada)
     elif page == "Assistente IA":
         assistente_ia(df_infos, df_transacoes)
+    elif page == "Equipe Quantum":
+        equipe_quantum()
+
+def equipe_quantum():
+    """Página com informações da equipe Quantum"""
+    st.title("Equipe Quantum")
+    st.markdown("---")
+    
+    # Adicionar logo centralizada
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        st.image("Logo-Quantum.png", width=300)
+    
+    st.markdown("---")
+    
+    # Título da seção
+    st.header("Integrantes da Equipe")
+    
+    # Informações dos membros em colunas
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("""
+        ### **Alexandre Ilha de Vilhena**
+        **RM:** 88689  
+        **Especialidade:** Desenvolvimento e Arquitetura de Sistemas
+        
+        ---
+        
+        ### **Erik Hoon Ko**
+        **RM:** 93599  
+        **Especialidade:** Análise de Dados e Machine Learning
+        
+        ---
+        
+        ### **Rafael Fiel Cruz Miranda**
+        **RM:** 94654  
+        **Especialidade:** Data Science e Visualização
+        """)
+    
+    with col2:
+        st.markdown("""
+        ### **Luca Moraes Zaharic**
+        **RM:** 95794  
+        **Especialidade:** Backend e Integração de Sistemas
+        
+        ---
+        
+        ### **Bruno Norões de Magalhães**
+        **RM:** 82511  
+        **Especialidade:** Frontend e UX/UI
+        """)
 
 def dashboard_geral(df_infos, df_transacoes):
     """Dashboard geral com visão de todos os CNPJs"""
@@ -457,7 +513,7 @@ def dashboard_geral(df_infos, df_transacoes):
     
     # Filtrar empresas ideais para empréstimos
     empresas_ideais = ultimo_mes_data[
-        (ultimo_mes_data['score_saude_model_0_100'] >= ultimo_mes_data['q25_health']) &
+        (ultimo_mes_data['score_saude_model_0_100_lgbm'] >= ultimo_mes_data['q25_health']) &
         (ultimo_mes_data['score_dependencia_risco_0_100'] < ultimo_mes_data['q75_risk']) &
         (ultimo_mes_data['runway_meses'] >= 1) &
         (ultimo_mes_data['flag_stress_caixa'] == 0) &
@@ -467,7 +523,7 @@ def dashboard_geral(df_infos, df_transacoes):
     
     if len(empresas_ideais) > 0:
         # Ordenar por score de saúde (maior primeiro)
-        empresas_ideais = empresas_ideais.sort_values('score_saude_model_0_100', ascending=False)
+        empresas_ideais = empresas_ideais.sort_values('score_saude_model_0_100_lgbm', ascending=False)
         
         # Pegar top 10
         top_empresas_ideais = empresas_ideais.head(10)
@@ -475,13 +531,13 @@ def dashboard_geral(df_infos, df_transacoes):
         # Criar gráfico de barras
         fig_top_ideais = px.bar(
             top_empresas_ideais,
-            x='score_saude_model_0_100',
+            x='score_saude_model_0_100_lgbm',
             y='ID',
             orientation='h',
             title="Top 10 Empresas Ideais para Empréstimos",
-            color='score_saude_model_0_100',
+            color='score_saude_model_0_100_lgbm',
             color_continuous_scale='Greens',
-            labels={'score_saude_model_0_100': 'Score de Saúde', 'ID': 'CNPJ'}
+            labels={'score_saude_model_0_100_lgbm': 'Score de Saúde', 'ID': 'CNPJ'}
         )
         
         fig_top_ideais.update_layout(
@@ -492,10 +548,12 @@ def dashboard_geral(df_infos, df_transacoes):
         )
         
         # Adicionar annotations com valores (apenas se não for NaN)
-        for i, (cnpj, score) in enumerate(zip(top_empresas_ideais['ID'], top_empresas_ideais['score_saude_model_0_100'])):
+        for i, (cnpj, score) in enumerate(zip(top_empresas_ideais['ID'], top_empresas_ideais['score_saude_model_0_100_lgbm'])):
             if not pd.isna(score):
+
                 fig_top_ideais.add_annotation(
-                    x=score + max(top_empresas_ideais['score_saude_model_0_100']) * 0.01,
+                    x=score + max(top_empresas_ideais['score_saude_model_0_100_lgbm']) * 0.21,
+
                     y=cnpj,
                     text=f"{score:.1f}",
                     showarrow=False,
@@ -508,7 +566,7 @@ def dashboard_geral(df_infos, df_transacoes):
         # Tabela detalhada
         st.markdown("#### Detalhes das Top Empresas para Empréstimos")
         
-        tabela_ideais = top_empresas_ideais[['ID', 'score_saude_model_0_100', 'score_dependencia_risco_0_100', 
+        tabela_ideais = top_empresas_ideais[['ID', 'score_saude_model_0_100_lgbm', 'score_dependencia_risco_0_100', 
                                            'runway_meses', 'grow_volume_total_mes', 'estado_maturidade_hard']].copy()
         
         tabela_ideais.columns = ['CNPJ', 'Saúde', 'Risco Concentração', 'Runway (Meses)', 'Crescimento (%)', 'Estado']
@@ -542,7 +600,7 @@ def dashboard_geral(df_infos, df_transacoes):
     
     # Filtrar empresas perigosas
     empresas_perigosas = ultimo_mes_data[
-        (ultimo_mes_data['score_saude_model_0_100'] <= ultimo_mes_data['q25_health']) &
+        (ultimo_mes_data['score_saude_model_0_100_lgbm'] <= ultimo_mes_data['q25_health']) &
         (ultimo_mes_data['score_dependencia_risco_0_100'] >= ultimo_mes_data['q75_risk']) &
         ((ultimo_mes_data['runway_meses'] < 3) | (ultimo_mes_data['runway_meses'].isna())) &
         (ultimo_mes_data['flag_stress_caixa'] == 1) &
@@ -551,36 +609,38 @@ def dashboard_geral(df_infos, df_transacoes):
     ].copy()
     
     if len(empresas_perigosas) > 0:
-        # Ordenar por score de risco (maior primeiro)
-        empresas_perigosas = empresas_perigosas.sort_values('score_dependencia_risco_0_100', ascending=False)
+        # Ordenar por score de saúde (maior primeiro - igual ao de empréstimos, mas depois inverter)
+        empresas_perigosas = empresas_perigosas.sort_values('score_saude_model_0_100_lgbm', ascending=False)
+        # Inverter para pegar os piores casos (menores scores)
+        empresas_perigosas = empresas_perigosas.tail(10)
         
-        # Pegar top 10
-        top_empresas_perigosas = empresas_perigosas.head(10)
+        # Os top 10 perigosos já foram selecionados com tail(10)
+        top_empresas_perigosas = empresas_perigosas.copy()
         
         # Criar gráfico de barras
         fig_top_perigosas = px.bar(
             top_empresas_perigosas,
-            x='score_dependencia_risco_0_100',
+            x='score_saude_model_0_100_lgbm',
             y='ID',
             orientation='h',
             title="Top 10 Empresas de Alto Risco",
-            color='score_dependencia_risco_0_100',
+            color='score_saude_model_0_100_lgbm',
             color_continuous_scale='Reds',
-            labels={'score_dependencia_risco_0_100': 'Score de Risco', 'ID': 'CNPJ'}
+            labels={'score_saude_model_0_100_lgbm': 'Score de Saúde', 'ID': 'CNPJ'}
         )
         
         fig_top_perigosas.update_layout(
             height=500,
-            xaxis_title="Score de Risco de Concentração (0-100)",
+            xaxis_title="Score de Saúde (0-100)",
             yaxis_title="CNPJ",
-            yaxis={'categoryorder':'total ascending'}
+            yaxis={'categoryorder':'total descending'}  # Ordem decrescente para mostrar menores valores primeiro
         )
         
         # Adicionar annotations com valores (apenas se não for NaN)
-        for i, (cnpj, score) in enumerate(zip(top_empresas_perigosas['ID'], top_empresas_perigosas['score_dependencia_risco_0_100'])):
+        for i, (cnpj, score) in enumerate(zip(top_empresas_perigosas['ID'], top_empresas_perigosas['score_saude_model_0_100_lgbm'])):
             if not pd.isna(score):
                 fig_top_perigosas.add_annotation(
-                    x=score + max(top_empresas_perigosas['score_dependencia_risco_0_100']) * 0.01,
+                    x=score + max(top_empresas_perigosas['score_saude_model_0_100_lgbm']) * 0.01,
                     y=cnpj,
                     text=f"{score:.1f}",
                     showarrow=False,
@@ -593,7 +653,7 @@ def dashboard_geral(df_infos, df_transacoes):
         # Tabela detalhada
         st.markdown("#### Detalhes das Top Empresas Perigosas")
         
-        tabela_perigosas = top_empresas_perigosas[['ID', 'score_saude_model_0_100', 'score_dependencia_risco_0_100', 
+        tabela_perigosas = top_empresas_perigosas[['ID', 'score_saude_model_0_100_lgbm', 'score_dependencia_risco_0_100', 
         'runway_meses', 'grow_volume_total_mes', 'estado_maturidade_hard']].copy()
         
         tabela_perigosas.columns = ['CNPJ', 'Saúde', 'Risco Concentração', 'Runway (Meses)', 'Crescimento (%)', 'Estado']
@@ -604,6 +664,9 @@ def dashboard_geral(df_infos, df_transacoes):
         # Tratar runway negativo ou NaN
         tabela_perigosas['Runway (Meses)'] = tabela_perigosas['Runway (Meses)'].fillna(0)
         tabela_perigosas['Runway (Meses)'] = tabela_perigosas['Runway (Meses)'].round(1)
+        
+        # Ordenar tabela pelo score de saúde (menores primeiro)
+        tabela_perigosas = tabela_perigosas.sort_values('Saúde', ascending=True)
         
         st.dataframe(tabela_perigosas, use_container_width=True)
         
@@ -951,142 +1014,6 @@ def dashboard_geral(df_infos, df_transacoes):
         st.plotly_chart(fig_distribuicao, use_container_width=True)
     
     st.divider()
-
-    # Análise de Crescimento e Volatilidade
-    st.subheader("Crescimento e Volatilidade da Carteira")
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        fig_crescimento = go.Figure()
-        
-        fig_crescimento.add_trace(go.Scatter(
-            x=stats_mensais['MES'],
-            y=stats_mensais['Crescimento_Volume_Medio'],
-            mode='lines+markers',
-            name='Crescimento Médio do Volume',
-            line=dict(color='green', width=3),
-            marker=dict(size=8)
-        ))
-        
-        fig_crescimento.update_layout(
-            title="Evolução do Crescimento Médio do Volume",
-            xaxis_title="Mês",
-            yaxis_title="Crescimento (%)",
-            height=400
-        )
-        
-        fig_crescimento.update_yaxes(tickformat='.1%')
-        
-        # Adicionar annotations com valores percentuais próximas aos pontos (apenas se não for NaN)
-        for i, (mes, valor) in enumerate(zip(stats_mensais['MES'], stats_mensais['Crescimento_Volume_Medio'])):
-            if not pd.isna(valor):
-                fig_crescimento.add_annotation(
-                    x=mes,
-                    y=valor,
-                    text=f"{valor:.1%}",
-                    showarrow=True,
-                    arrowhead=2,
-                    arrowsize=1,
-                    arrowwidth=1,
-                    arrowcolor="black",
-                    ax=0,
-                    ay=-20,
-                    font=dict(size=12, color="black"),
-                    bgcolor="white",
-                    bordercolor="black",
-                    borderwidth=1
-                )
-        
-        st.plotly_chart(fig_crescimento, use_container_width=True)
-    
-    with col2:
-        fig_volatilidade = go.Figure()
-        
-        fig_volatilidade.add_trace(go.Scatter(
-            x=stats_mensais['MES'],
-            y=stats_mensais['Volatilidade_Media'],
-            mode='lines+markers',
-            name='Volatilidade Média',
-            line=dict(color='orange', width=3),
-            marker=dict(size=8)
-        ))
-        
-        fig_volatilidade.update_layout(
-            title="Evolução da Volatilidade Média",
-            xaxis_title="Mês",
-            yaxis_title="Volatilidade",
-            height=400
-        )
-        
-        # Adicionar annotations com valores próximas aos pontos (apenas se não for NaN)
-        for i, (mes, valor) in enumerate(zip(stats_mensais['MES'], stats_mensais['Volatilidade_Media'])):
-            if not pd.isna(valor):
-                fig_volatilidade.add_annotation(
-                    x=mes,
-                    y=valor,
-                    text=f"{valor:.2f}",
-                    showarrow=True,
-                    arrowhead=2,
-                    arrowsize=1,
-                    arrowwidth=1,
-                    arrowcolor="black",
-                    ax=0,
-                    ay=-20,
-                    font=dict(size=12, color="black"),
-                    bgcolor="white",
-                    bordercolor="black",
-                    borderwidth=1
-                )
-        
-        st.plotly_chart(fig_volatilidade, use_container_width=True)
-    
-    # Métricas de Resumo Atual
-    st.subheader("Resumo Atual da Carteira")
-    
-    # Pegar dados do último mês
-    ultimo_mes_data = df_analisada[df_analisada['MES'] == df_analisada['MES'].max()]
-    
-    if len(ultimo_mes_data) > 0:
-        col1, col2, col3, col4 = st.columns(4)
-        
-        with col1:
-            saude_media_atual = ultimo_mes_data['score_saude_model_0_100'].mean()
-            st.metric("Saúde Média Atual", f"{saude_media_atual:.1f}")
-        
-        with col2:
-            risco_medio_atual = ultimo_mes_data['score_dependencia_risco_0_100'].mean()
-            st.metric("Risco de Concentração Médio Atual", f"{risco_medio_atual:.1f}")
-        
-        with col3:
-            empresas_stress_atual = ultimo_mes_data['flag_stress_caixa'].sum()
-            total_empresas = len(ultimo_mes_data)
-            percentual_stress = (empresas_stress_atual / total_empresas) * 100
-            st.metric("Empresas em Stress", f"{empresas_stress_atual} ({percentual_stress:.1f}%)")
-        
-        with col4:
-            crescimento_medio_atual = ultimo_mes_data['grow_volume_total_mes'].mean()
-            st.metric("Crescimento Médio", f"{crescimento_medio_atual:.1%}")
-    
-    st.divider()
-    # Heatmap temporal
-    st.subheader("Heatmap Temporal de Transações")
-    
-    # Dropdown informativo para heatmap
-    with st.expander("Sobre o Heatmap Temporal", expanded=False):
-        st.markdown("""
-        **O que observar:**
-        - **Padrões temporais**: Dias da semana e meses com mais atividade
-        - **Sazonalidade**: Variações mensais e semanais
-        - **Tendências**: Crescimento ou declínio ao longo do tempo
-        - **Oportunidades**: Períodos de baixa atividade para campanhas
-        
-        **Para o Santander:** Identifica melhores momentos para oferecer produtos 
-        e entender padrões de fluxo de caixa dos clientes.
-        """)
-    
-    heatmap_fig = create_heatmap_temporal(df_transacoes)
-    st.plotly_chart(heatmap_fig, use_container_width=True, key="heatmap_chart")
  
 
 
@@ -1162,10 +1089,12 @@ def analise_individual(df_infos, df_transacoes, df_analisada):
         
         with col1:
             estado = ultimo_mes['estado_maturidade_hard']
-            st.metric(
-                "Maturidade da Empresa", 
-                estado
-            )
+            # st.metric(
+            #     "Maturidade da Empresa", 
+            #     estado
+            # )
+
+            st.markdown(f"**Maturidade da Empresa:**<br/>{estado}", unsafe_allow_html=True)
 
             with st.expander("Sobre a Maturidade da Empresa", expanded=True):
                 if 'explicativo_maturidade_aberto' in ultimo_mes and pd.notna(ultimo_mes['explicativo_maturidade_aberto']):
@@ -1196,10 +1125,7 @@ def analise_individual(df_infos, df_transacoes, df_analisada):
             else:
                 recomendacao = "Análise Adicional Necessária"
             
-            st.metric(
-                "Recomendação de Crédito", 
-                recomendacao
-            )
+            st.markdown(f"**Recomendação de Crédito:**<br/>{recomendacao}", unsafe_allow_html=True)
     
     # Informações básicas
     st.subheader(f"Informações da Empresa: {cnpj_selecionado}")
@@ -1216,7 +1142,7 @@ def analise_individual(df_infos, df_transacoes, df_analisada):
     
     with col3:
         setor = dados_cnpj['DS_CNAE'].iloc[0]
-        st.metric("Setor", setor)
+        st.markdown(f"**Setor:**<br/>{setor}", unsafe_allow_html=True)
     
     with col4:
         idade_meses = len(dados_cnpj)
